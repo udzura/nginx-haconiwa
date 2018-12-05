@@ -2,8 +2,10 @@
 # frozen_string_literal: true
 
 HACONIWA_BIN_PATH = '/usr/bin/haconiwa'
-IMAGES_ROOT = '/tmp/criu/images'
+IMAGES_ROOT = '/data/criu-images'
 CleanSpawn.cgroup_root_path = '/sys/fs/cgroup/systemd'
+
+ROLE = `hostname -s`.chomp
 
 module Container
   class << self
@@ -28,24 +30,14 @@ module Container
       dispatch(haco, cip, cport)
     end
 
-    def dispatch_smtp_no_auth1
+    def dispatch_smtp_no_auth
       containers = conf['containers']['smtp']
-      haco = containers['noauth1']['haco']
-      cip = containers['noauth1']['ip']
+      haco = containers['default']['haco']
+      cip = containers['default']['ip']
       cport = 25
       c = Nginx::Stream::Connection.new 'dynamic_server'
       c.upstream_server = "#{cip}:#{cport}"
-      dispatch(haco, cip, cport)
-    end
-
-    def dispatch_smtp_no_auth2
-      containers = conf['containers']['smtp']
-      haco = containers['noauth2']['haco']
-      cip = containers['noauth2']['ip']
-      cport = 25
-      c = Nginx::Stream::Connection.new 'dynamic_server'
-      c.upstream_server = "#{cip}:#{cport}"
-      dispatch(haco, cip, cport)
+      dispatch(haco, cip, cport, ['BENCH=true'])
     end
 
     def dispatch_smtp_after_smtp_auth
@@ -80,10 +72,10 @@ module Container
       raise "Not enough container info -- haco: #{haco}, ip: #{ip} port: #{port}" \
         if haco.nil? || ip.nil? || port.nil?
 
-      if ! File.exist?(IMAGES_ROOT + "/apache/core-1.img")
-        return Dispatcher.new(ip, port, haco, env, hostname).run
-      else
+      if File.exist?(IMAGES_ROOT + "/rails/core-1.img") && ROLE == 'dest'
         return Dispatcher.new(ip, port, haco, env, hostname).restore
+      else
+        return Dispatcher.new(ip, port, haco, env, hostname).run
       end
     rescue => e
       err(e.message)
@@ -119,10 +111,10 @@ module Container
       @ip = ip
       @port = port
       @haco = haco
+      @env = env
 
       @root = '/var/lib/haconiwa'
-      @id = "#{@haco}-#{@ip.gsub('.', '-')}-#{Time.now.to_i}"
-      # @id = "#{@haco}-#{@ip.gsub('.', '-')}-1540895210"
+      @id = "#{@haco}-#{@ip.gsub('.', '-')}"
       @environment = ["IP=#{@ip}", "PORT=#{@port}", "ID=#{@id}", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]
       @environment.concat(env) if env.length > 0
       @hostname = hostname
@@ -133,6 +125,12 @@ module Container
       if listen?
         Container.debug('Already container launched!')
         return result
+      end
+
+      if ROLE == 'victim'
+        # Redirect it to dest
+        # And dest runs fastcontainer
+        return '192.168.31.20:80'
       end
 
       Container.debug('Launching a container...')
@@ -161,21 +159,9 @@ module Container
     end
 
     def setup_rootfs
-      rootfs = "#{@root}/rootfs/#{@id}"
-      return if File.exist?(rootfs)
-      system "/bin/mkdir -m 755 -p #{rootfs}"
-      system "/bin/tar xfp #{@root}/images/#{@haco}.image.tar -C #{rootfs}"
-      setup_hosts(rootfs)
-      setup_welcome_html(rootfs) if @haco == 'nginx'
-    end
-
-    def setup_hosts(root)
-      cmd = [
-        "/bin/echo \"127.0.0.1 localhost #{@id}\" >> #{root}/etc/hosts",
-        "/bin/cat /data/hosts >> #{root}/etc/hosts"
-      ].join(' && ')
-      Container.debug(cmd)
-      system cmd
+      # system "/bin/mkdir -m 755 -p #{rootfs}"
+      # system "/bin/tar xfp #{@root}/images/#{@haco}.image.tar -C #{rootfs}"
+      # setup_welcome_html(rootfs) if @haco == 'nginx'
     end
 
     def setup_welcome_html(root)
@@ -249,8 +235,7 @@ end
 lambda do
   return case nginx_local_port
          when 58080 then Container.dispatch_smtp_after_smtp_auth
-         when 58025 then Container.dispatch_smtp_no_auth1
-         when 58026 then Container.dispatch_smtp_no_auth2
+         when 58025 then Container.dispatch_smtp_no_auth
          when 80 then Container.dispatch_http
          when 8022 then Container.dispatch_ssh
          end

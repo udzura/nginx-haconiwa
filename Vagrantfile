@@ -8,24 +8,36 @@ Vagrant.configure('2') do |config|
     vb.cpus = 1
   end
 
-  config.vm.define 'containers', primary: true do |c|
+  config.vm.define :victim do |c|
     c.disksize.size = '50GB'
     c.vm.provider 'virtualbox' do |vb|
-      vb.memory = 512 * 6
-      vb.cpus = 8
+      vb.memory = 512 * 2
+      vb.cpus = 2
     end
     %w(80 443).each do |port|
-      c.vm.network 'forwarded_port', guest: port, host: "8#{port.rjust(3, '0')}"
+      c.vm.network 'forwarded_port', guest: port, host: "10#{port.rjust(3, '0')}"
     end
-    %w(22 25).each do |port|
-      p = "8#{port.rjust(3, '0')}"
-      c.vm.network 'forwarded_port', guest: p, host: p
-    end
-    c.vm.network 'forwarded_port', guest: 19999, host: 9000
     c.vm.synced_folder './provision', '/data'
     c.vm.provision 'shell', path: 'provision/containers.sh'
-    c.vm.hostname = 'containers'
-    c.vm.network :private_network, ip:'192.168.30.10'
+    c.vm.provision 'shell', inline: 'hostnamectl set-hostname victim.example'
+    c.vm.hostname = 'victim.example'
+    c.vm.network :private_network, ip:'192.168.31.10'
+  end
+
+  config.vm.define :dest do |c|
+    c.disksize.size = '50GB'
+    c.vm.provider 'virtualbox' do |vb|
+      vb.memory = 512 * 2
+      vb.cpus = 2
+    end
+    %w(80 443).each do |port|
+      c.vm.network 'forwarded_port', guest: port, host: "11#{port.rjust(3, '0')}"
+    end
+    c.vm.synced_folder './provision', '/data'
+    c.vm.provision 'shell', path: 'provision/containers.sh'
+    c.vm.provision 'shell', inline: 'hostnamectl set-hostname dest.example'
+    c.vm.hostname = 'dest.example'
+    c.vm.network :private_network, ip:'192.168.31.20'
   end
 
   autostart_bench = !!ENV['BENCH']
